@@ -61,6 +61,12 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
+
+	DMA_DPCR         |= DMA_DPCR_CH_ENABLE(DMA_GPU);
+	DMA_CHCR(DMA_GPU) = 0;
+
+	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
 }
 
 static void waitForGP0Ready(void) {
@@ -68,7 +74,7 @@ static void waitForGP0Ready(void) {
 		__asm__ volatile("");
 }
 
-static void waitForDMADone(void) {
+static void waitForGPUDMADone(void) {
 	while (DMA_CHCR(DMA_GPU) & DMA_CHCR_ENABLE)
 		__asm__ volatile("");
 }
@@ -80,8 +86,8 @@ static void waitForVSync(void) {
 	IRQ_STAT = ~(1 << IRQ_VSYNC);
 }
 
-static void sendLinkedList(const void *data) {
-	waitForDMADone();
+static void sendGPULinkedList(const void *data) {
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	DMA_MADR(DMA_GPU) = (uint32_t) data;
@@ -100,7 +106,7 @@ static void sendVRAMData(
 	int        width,
 	int        height
 ) {
-	waitForDMADone();
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	// Calculate how many 32-bit words will be sent from the width and height of
@@ -141,21 +147,21 @@ static void sendVRAMData(
 		| DMA_CHCR_ENABLE;
 }
 
-#define CHAIN_BUFFER_SIZE 1024
+#define GPU_CHAIN_BUFFER_SIZE 1024
 
 typedef struct {
-	uint32_t data[CHAIN_BUFFER_SIZE];
+	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
 	uint32_t *nextPacket;
-} DMAChain;
+} GPUDMAChain;
 
-static uint32_t *allocatePacket(DMAChain *chain, int numCommands) {
+static uint32_t *allocateGP0Packet(GPUDMAChain *chain, int numCommands) {
 	assert((numCommands >= 0) && (numCommands <= DMA_MAX_CHUNK_SIZE));
 
 	uint32_t *ptr      = chain->nextPacket;
 	chain->nextPacket += numCommands + 1;
 
 	*ptr = gp0_tag(numCommands, chain->nextPacket);
-	assert(chain->nextPacket < &(chain->data)[CHAIN_BUFFER_SIZE]);
+	assert(chain->nextPacket < &(chain->data)[GPU_CHAIN_BUFFER_SIZE]);
 
 	return &ptr[1];
 }
@@ -183,7 +189,7 @@ static void uploadTexture(
 	// Upload the texture to VRAM, wait for the process to complete and flush
 	// any previously used texture from the GPU's internal cache.
 	sendVRAMData(data, x, y, width, height);
-	waitForDMADone();
+	waitForGPUDMADone();
 	GPU_GP0 = gp0_flushCache();
 
 	// Update the "texture page" attribute, a 16-bit field telling the GPU
@@ -226,11 +232,6 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	DMA_DPCR |= DMA_DPCR_CH_ENABLE(DMA_GPU);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
 	// Load the texture, placing it next to the two framebuffers in VRAM.
 	TextureInfo texture;
 
@@ -246,15 +247,15 @@ int main(int argc, const char **argv) {
 	int x = 0, velocityX = 1;
 	int y = 0, velocityY = 1;
 
-	DMAChain dmaChains[2];
-	bool     usingSecondFrame = false;
+	GPUDMAChain dmaChains[2];
+	bool        usingSecondFrame = false;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
@@ -262,16 +263,16 @@ int main(int argc, const char **argv) {
 
 		chain->nextPacket = chain->data;
 
-		ptr    = allocatePacket(chain, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH -  1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -279,11 +280,15 @@ int main(int argc, const char **argv) {
 		// Use the texture we uploaded to draw a sprite (textured rectangle).
 		// Two separate commands have to be sent: a texture page command to
 		// apply our page attribute and disable dithering, followed by the
-		// actual rectangle drawing command. Any subsequent commands will reuse
-		// the last page settings by default, so it's not strictly necessary to
-		// send a page command for each rectangle drawn.
-		ptr    = allocatePacket(chain, 5);
-		ptr[0] = gp0_texpage(texture.page, false, false);
+		// actual rectangle drawing command. Any subsequent rectangle commands
+		// will reuse the last page set, so it's not strictly necessary to send
+		// a page command for each rectangle drawn.
+		// NOTE: while not covered here, triangle and quad commands have an
+		// inline page attribute and do not require a separate page setting
+		// command (if not to toggle dithering, which the inline page field does
+		// not affect).
+		ptr    = allocateGP0Packet(chain, 5);
+		ptr[0] = gp0_setPage(texture.page, false, false);
 		ptr[1] = gp0_rectangle(true, true, false);
 		ptr[2] = gp0_xy(x, y);
 		ptr[3] = gp0_uv(texture.u, texture.v, 0);
@@ -301,7 +306,7 @@ int main(int argc, const char **argv) {
 
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(chain->data);
+		sendGPULinkedList(chain->data);
 	}
 
 	return 0;

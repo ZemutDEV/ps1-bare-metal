@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 void printString(
-	DMAChain          *chain,
+	GPUDMAChain       *chain,
 	const TextureInfo *font,
 	int               x,
 	int               y,

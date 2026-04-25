@@ -110,8 +110,8 @@ typedef enum {
 } GP0MiscCommand;
 
 typedef enum {
-	GP0_CMD_TEXPAGE    = GP0_CMD_ATTRIBUTE | (1 << 24),
-	GP0_CMD_TEXWINDOW  = GP0_CMD_ATTRIBUTE | (2 << 24),
+	GP0_CMD_TPAGE      = GP0_CMD_ATTRIBUTE | (1 << 24),
+	GP0_CMD_TWINDOW    = GP0_CMD_ATTRIBUTE | (2 << 24),
 	GP0_CMD_FB_OFFSET1 = GP0_CMD_ATTRIBUTE | (3 << 24),
 	GP0_CMD_FB_OFFSET2 = GP0_CMD_ATTRIBUTE | (4 << 24),
 	GP0_CMD_FB_ORIGIN  = GP0_CMD_ATTRIBUTE | (5 << 24),
@@ -202,19 +202,19 @@ DEF(uint32_t) gp0_irq(void) {
 	return GP0_CMD_IRQ;
 }
 
-DEF(uint32_t) gp0_texpage(uint16_t page, bool dither, bool unlockFB) {
-	return GP0_CMD_TEXPAGE
+DEF(uint32_t) gp0_setPage(uint16_t page, bool dither, bool unlockFB) {
+	return GP0_CMD_TPAGE
 		| ((page     & 0x9ff) <<  0)
 		| ((dither   &     1) <<  9)
 		| ((unlockFB &     1) << 10);
 }
-DEF(uint32_t) gp0_texwindow(
+DEF(uint32_t) gp0_setWindow(
 	uint8_t baseX,
 	uint8_t baseY,
 	uint8_t maskX,
 	uint8_t maskY
 ) {
-	return GP0_CMD_TEXWINDOW
+	return GP0_CMD_TWINDOW
 		| ((maskX & 0x1f) <<  0)
 		| ((maskY & 0x1f) <<  5)
 		| ((baseX & 0x1f) << 10)

@@ -60,7 +60,9 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 	int offsetX = (width  * gp1_clockMultiplierH(horizontalRes)) / 2;
 	int offsetY = (height / gp1_clockDividerV(verticalRes))      / 2;
 
-	// Hand all parameters over to the GPU by sending GP1 commands.
+	// Hand all parameters over to the GPU by sending GP1 commands. The last
+	// command unblanks (turns on) the video output, as resetting the GPU blanks
+	// it by default.
 	GPU_GP1 = gp1_resetGPU();
 	GPU_GP1 = gp1_fbRangeH(x - offsetX, x + offsetX);
 	GPU_GP1 = gp1_fbRangeV(y - offsetY, y + offsetY);
@@ -71,6 +73,7 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
 }
 
 static void waitForGP0Ready(void) {
@@ -104,7 +107,7 @@ int main(int argc, const char **argv) {
 	// Wait for the GPU to become ready, then send some GP0 commands to tell it
 	// which area of the framebuffer we want to draw to and enable dithering.
 	waitForGP0Ready();
-	GPU_GP0 = gp0_texpage(0, true, false);
+	GPU_GP0 = gp0_setPage(0, true, false);
 	GPU_GP0 = gp0_fbOffset1(0, 0);
 	GPU_GP0 = gp0_fbOffset2(SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
 	GPU_GP0 = gp0_fbOrigin(0, 0);
@@ -127,10 +130,8 @@ int main(int argc, const char **argv) {
 	GPU_GP0 = gp0_rgb(0, 0, 255);
 	GPU_GP0 = gp0_xy(SCREEN_WIDTH - 32, SCREEN_HEIGHT - 32);
 
-	// Send two GP1 commands to set the origin of the area we want to display
-	// and switch on the display output.
+	// Send a GP1 command to set the origin of the area we want to display.
 	GPU_GP1 = gp1_fbOffset(0, 0);
-	GPU_GP1 = gp1_dispBlank(false);
 
 	// Continue by doing nothing.
 	for (;;)

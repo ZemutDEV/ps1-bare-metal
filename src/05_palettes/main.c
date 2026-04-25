@@ -59,6 +59,12 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
+
+	DMA_DPCR         |= DMA_DPCR_CH_ENABLE(DMA_GPU);
+	DMA_CHCR(DMA_GPU) = 0;
+
+	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
 }
 
 static void waitForGP0Ready(void) {
@@ -66,7 +72,7 @@ static void waitForGP0Ready(void) {
 		__asm__ volatile("");
 }
 
-static void waitForDMADone(void) {
+static void waitForGPUDMADone(void) {
 	while (DMA_CHCR(DMA_GPU) & DMA_CHCR_ENABLE)
 		__asm__ volatile("");
 }
@@ -78,8 +84,8 @@ static void waitForVSync(void) {
 	IRQ_STAT = ~(1 << IRQ_VSYNC);
 }
 
-static void sendLinkedList(const void *data) {
-	waitForDMADone();
+static void sendGPULinkedList(const void *data) {
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	DMA_MADR(DMA_GPU) = (uint32_t) data;
@@ -98,7 +104,7 @@ static void sendVRAMData(
 	int        width,
 	int        height
 ) {
-	waitForDMADone();
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	size_t length = (width * height + 1) / 2;
@@ -127,21 +133,21 @@ static void sendVRAMData(
 		| DMA_CHCR_ENABLE;
 }
 
-#define CHAIN_BUFFER_SIZE 1024
+#define GPU_CHAIN_BUFFER_SIZE 1024
 
 typedef struct {
-	uint32_t data[CHAIN_BUFFER_SIZE];
+	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
 	uint32_t *nextPacket;
-} DMAChain;
+} GPUDMAChain;
 
-static uint32_t *allocatePacket(DMAChain *chain, int numCommands) {
+static uint32_t *allocateGP0Packet(GPUDMAChain *chain, int numCommands) {
 	assert((numCommands >= 0) && (numCommands <= DMA_MAX_CHUNK_SIZE));
 
 	uint32_t *ptr      = chain->nextPacket;
 	chain->nextPacket += numCommands + 1;
 
 	*ptr = gp0_tag(numCommands, chain->nextPacket);
-	assert(chain->nextPacket < &(chain->data)[CHAIN_BUFFER_SIZE]);
+	assert(chain->nextPacket < &(chain->data)[GPU_CHAIN_BUFFER_SIZE]);
 
 	return &ptr[1];
 }
@@ -181,13 +187,13 @@ static void uploadIndexedTexture(
 	// Upload the image and palette data separately, then flush any previously
 	// used texture from the GPU's internal cache.
 	sendVRAMData(image, imageX, imageY, width / widthDivider, height);
-	waitForDMADone();
+	waitForGPUDMADone();
 	sendVRAMData(palette, paletteX, paletteY, numColors, 1);
-	waitForDMADone();
+	waitForGPUDMADone();
 	GPU_GP0 = gp0_flushCache();
 
-	// Update the texpage and CLUT attributes to match the location of the image
-	// and palette as well as the color depth.
+	// Update the texture page and CLUT attributes to match the VRAM locations
+	// of the image and palette respectively.
 	info->page = gp0_page(
 		imageX /  64,
 		imageY / 256,
@@ -226,11 +232,6 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	DMA_DPCR |= DMA_DPCR_CH_ENABLE(DMA_GPU);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
 	// Load the texture, placing the image next to the two framebuffers in VRAM
 	// and the palette below the image.
 	TextureInfo texture;
@@ -251,15 +252,15 @@ int main(int argc, const char **argv) {
 	int x = 0, velocityX = 1;
 	int y = 0, velocityY = 1;
 
-	DMAChain dmaChains[2];
-	bool     usingSecondFrame = false;
+	GPUDMAChain dmaChains[2];
+	bool        usingSecondFrame = false;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
@@ -267,24 +268,24 @@ int main(int argc, const char **argv) {
 
 		chain->nextPacket = chain->data;
 
-		ptr    = allocatePacket(chain, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH  - 1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
 
 		// Draw the sprite, almost identically to how we did it in the previous
 		// example. Notice how the CLUT attribute is being passed to the GPU.
-		ptr    = allocatePacket(chain, 5);
-		ptr[0] = gp0_texpage(texture.page, false, false);
+		ptr    = allocateGP0Packet(chain, 5);
+		ptr[0] = gp0_setPage(texture.page, false, false);
 		ptr[1] = gp0_rectangle(true, true, false);
 		ptr[2] = gp0_xy(x, y);
 		ptr[3] = gp0_uv(texture.u, texture.v, texture.clut);
@@ -302,7 +303,7 @@ int main(int argc, const char **argv) {
 
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(chain->data);
+		sendGPULinkedList(chain->data);
 	}
 
 	return 0;

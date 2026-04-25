@@ -33,11 +33,10 @@
 
 typedef enum {
 	DEV0_BASE  = 0xbf000000,
-	EXP1_BASE  = 0xbf000000,
 	CACHE_BASE = 0x9f800000, // Cannot be accessed from KSEG1
 	IO_BASE    = 0xbf801000,
-	EXP2_BASE  = 0xbf802000,
-	EXP3_BASE  = 0xbfa00000,
+	DEV8_BASE  = 0xbf802000,
+	DEV1_BASE  = 0xbfa00000,
 	DEV2_BASE  = 0xbfc00000,
 	CPU_BASE   = 0xfffe0000
 } BaseAddress;
@@ -62,14 +61,14 @@ typedef enum {
 	BIU_CTRL_WAIT                =  1 << 31
 } BIUControlFlag;
 
-#define BIU_DEV0_ADDR _MMIO32(IO_BASE | 0x000) // PIO/573
-#define BIU_EXP2_ADDR _MMIO32(IO_BASE | 0x004) // PIO/debug
-#define BIU_DEV0_CTRL _MMIO32(IO_BASE | 0x008) // PIO/573
-#define BIU_EXP3_CTRL _MMIO32(IO_BASE | 0x00c) // PIO/debug
+#define BIU_DEV0_ADDR _MMIO32(IO_BASE | 0x000) // PIO/arcade
+#define BIU_DEV8_ADDR _MMIO32(IO_BASE | 0x004) // PIO/debug
+#define BIU_DEV0_CTRL _MMIO32(IO_BASE | 0x008) // PIO/arcade
+#define BIU_DEV1_CTRL _MMIO32(IO_BASE | 0x00c) // PIO/arcade/debug
 #define BIU_DEV2_CTRL _MMIO32(IO_BASE | 0x010) // BIOS ROM
 #define BIU_DEV4_CTRL _MMIO32(IO_BASE | 0x014) // SPU
 #define BIU_DEV5_CTRL _MMIO32(IO_BASE | 0x018) // CD-ROM
-#define BIU_EXP2_CTRL _MMIO32(IO_BASE | 0x01c) // PIO/debug
+#define BIU_DEV8_CTRL _MMIO32(IO_BASE | 0x01c) // PIO/debug
 #define BIU_COM_DELAY _MMIO32(IO_BASE | 0x020)
 
 /* Serial interfaces */
@@ -134,14 +133,22 @@ typedef enum {
 /* DRAM controller */
 
 typedef enum {
-	DRAM_CTRL_UNKNOWN     = 1 <<  3,
-	DRAM_CTRL_FETCH_DELAY = 1 <<  7,
-	DRAM_CTRL_SIZE_MUL1   = 0 <<  9,
-	DRAM_CTRL_SIZE_MUL4   = 1 <<  9,
-	DRAM_CTRL_COUNT_1     = 0 << 10, // 1 DRAM bank (single RAS)
-	DRAM_CTRL_COUNT_2     = 1 << 10, // 2 DRAM banks (dual RAS)
-	DRAM_CTRL_SIZE_1MB    = 0 << 11, // 1MB chips (4MB with MUL4)
-	DRAM_CTRL_SIZE_2MB    = 1 << 11  // 2MB chips (8MB with MUL4)
+	DRAM_CTRL_UNKNOWN1        = 1 <<  3,
+	DRAM_CTRL_REFRESH_BITMASK = 3 <<  4,
+	DRAM_CTRL_REFRESH_256     = 0 <<  4,
+	DRAM_CTRL_REFRESH_320     = 1 <<  4,
+	DRAM_CTRL_REFRESH_384     = 2 <<  4,
+	DRAM_CTRL_REFRESH_448     = 3 <<  4,
+	DRAM_CTRL_FETCH_DELAY     = 1 <<  7,
+	DRAM_CTRL_UNKNOWN2        = 1 <<  8,
+	DRAM_CTRL_SIZE_BITMASK    = (1 << 9) | (1 << 11),
+	DRAM_CTRL_SIZE_1MB        = (0 << 9) | (0 << 11),
+	DRAM_CTRL_SIZE_2MB        = (0 << 9) | (1 << 11),
+	DRAM_CTRL_SIZE_4MB        = (1 << 9) | (0 << 11),
+	DRAM_CTRL_SIZE_8MB        = (1 << 9) | (1 << 11),
+	DRAM_CTRL_BANKS_BITMASK   = 0 << 10,
+	DRAM_CTRL_BANKS_1         = 0 << 10,
+	DRAM_CTRL_BANKS_2         = 1 << 10
 } DRAMControlFlag;
 
 #define DRAM_CTRL _MMIO32(IO_BASE | 0x060)
@@ -317,25 +324,25 @@ typedef enum {
 /* GPU */
 
 typedef enum {
-	GP1_STAT_PAGE_X_BITMASK      = 15 <<  0, // GP0_CMD_TEXPAGE
-	GP1_STAT_PAGE_Y0             =  1 <<  4, // GP0_CMD_TEXPAGE
-	GP1_STAT_BLEND_BITMASK       =  3 <<  5, // GP0_CMD_TEXPAGE
-	GP1_STAT_BLEND_SEMITRANS     =  0 <<  5, // GP0_CMD_TEXPAGE
-	GP1_STAT_BLEND_ADD           =  1 <<  5, // GP0_CMD_TEXPAGE
-	GP1_STAT_BLEND_SUBTRACT      =  2 <<  5, // GP0_CMD_TEXPAGE
-	GP1_STAT_BLEND_DIV4_ADD      =  3 <<  5, // GP0_CMD_TEXPAGE
-	GP1_STAT_COLOR_BITMASK       =  3 <<  7, // GP0_CMD_TEXPAGE
-	GP1_STAT_COLOR_4BPP          =  0 <<  7, // GP0_CMD_TEXPAGE
-	GP1_STAT_COLOR_8BPP          =  1 <<  7, // GP0_CMD_TEXPAGE
-	GP1_STAT_COLOR_16BPP         =  2 <<  7, // GP0_CMD_TEXPAGE
-	GP1_STAT_DITHER              =  1 <<  9, // GP0_CMD_TEXPAGE
-	GP1_STAT_UNLOCK_FB           =  1 << 10, // GP0_CMD_TEXPAGE
+	GP1_STAT_PAGE_X_BITMASK      = 15 <<  0, // GP0_CMD_TPAGE
+	GP1_STAT_PAGE_Y0             =  1 <<  4, // GP0_CMD_TPAGE
+	GP1_STAT_BLEND_BITMASK       =  3 <<  5, // GP0_CMD_TPAGE
+	GP1_STAT_BLEND_SEMITRANS     =  0 <<  5, // GP0_CMD_TPAGE
+	GP1_STAT_BLEND_ADD           =  1 <<  5, // GP0_CMD_TPAGE
+	GP1_STAT_BLEND_SUBTRACT      =  2 <<  5, // GP0_CMD_TPAGE
+	GP1_STAT_BLEND_DIV4_ADD      =  3 <<  5, // GP0_CMD_TPAGE
+	GP1_STAT_COLOR_BITMASK       =  3 <<  7, // GP0_CMD_TPAGE
+	GP1_STAT_COLOR_4BPP          =  0 <<  7, // GP0_CMD_TPAGE
+	GP1_STAT_COLOR_8BPP          =  1 <<  7, // GP0_CMD_TPAGE
+	GP1_STAT_COLOR_16BPP         =  2 <<  7, // GP0_CMD_TPAGE
+	GP1_STAT_DITHER              =  1 <<  9, // GP0_CMD_TPAGE
+	GP1_STAT_UNLOCK_FB           =  1 << 10, // GP0_CMD_TPAGE
 	GP1_STAT_SET_MASK            =  1 << 11, // GP0_CMD_FB_MASK
 	GP1_STAT_USE_MASK            =  1 << 12, // GP0_CMD_FB_MASK
 	GP1_STAT_DISP_FIELD_BITMASK  =  1 << 13,
 	GP1_STAT_DISP_FIELD_EVEN     =  0 << 13,
 	GP1_STAT_DISP_FIELD_ODD      =  1 << 13,
-	GP1_STAT_PAGE_Y1             =  1 << 15, // GP0_CMD_TEXPAGE
+	GP1_STAT_PAGE_Y1             =  1 << 15, // GP0_CMD_TPAGE
 	GP1_STAT_FB_HRES_BITMASK     =  7 << 16, // GP1_CMD_FB_MODE
 	GP1_STAT_FB_VRES_BITMASK     =  1 << 19, // GP1_CMD_FB_MODE
 	GP1_STAT_FB_VRES_256         =  0 << 19, // GP1_CMD_FB_MODE
@@ -479,13 +486,13 @@ typedef enum {
 #define SPU_ENDX0 _MMIO16(IO_BASE | 0xd9c)
 #define SPU_ENDX1 _MMIO16(IO_BASE | 0xd9e)
 
-#define SPU_ESA       _MMIO16(IO_BASE | 0xda2)
-#define SPU_IRQA      _MMIO16(IO_BASE | 0xda4)
-#define SPU_TSA       _MMIO16(IO_BASE | 0xda6)
-#define SPU_DATA      _MMIO16(IO_BASE | 0xda8)
-#define SPU_CTRL      _MMIO16(IO_BASE | 0xdaa)
-#define SPU_FIFO_CTRL _MMIO16(IO_BASE | 0xdac)
-#define SPU_STAT      _MMIO16(IO_BASE | 0xdae)
+#define SPU_ESA      _MMIO16(IO_BASE | 0xda2)
+#define SPU_IRQA     _MMIO16(IO_BASE | 0xda4)
+#define SPU_TSA      _MMIO16(IO_BASE | 0xda6)
+#define SPU_DATA     _MMIO16(IO_BASE | 0xda8)
+#define SPU_CTRL     _MMIO16(IO_BASE | 0xdaa)
+#define SPU_RAM_CTRL _MMIO16(IO_BASE | 0xdac)
+#define SPU_STAT     _MMIO16(IO_BASE | 0xdae)
 
 #define SPU_AVOLL  _MMIO16(IO_BASE | 0xdb0)
 #define SPU_AVOLR  _MMIO16(IO_BASE | 0xdb2)

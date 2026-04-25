@@ -20,10 +20,6 @@
 extern "C" {
 #endif
 
-/**
- * @brief Clears the CPU's instruction cache. This function should be called
- * whenever any new executable code is loaded into main RAM.
- */
 void flushCache(void);
 
 #ifdef __cplusplus

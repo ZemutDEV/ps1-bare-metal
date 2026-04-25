@@ -118,7 +118,7 @@ static const SpriteInfo fontSprites[] = {
 };
 
 void printString(
-	DMAChain          *chain,
+	GPUDMAChain       *chain,
 	const TextureInfo *font,
 	int               x,
 	int               y,
@@ -128,12 +128,11 @@ void printString(
 
 	uint32_t *ptr;
 
-	// Start by sending a texpage command to tell the GPU to use the font's
-	// spritesheet. Note that the texpage command before a drawing command can
-	// be omitted when reusing the same texture, so sending it here just once is
-	// enough.
-	ptr    = allocatePacket(chain, 1);
-	ptr[0] = gp0_texpage(font->page, false, false);
+	// Start by sending a texture page command to tell the GPU to use the font's
+	// spritesheet. The page setting persists when drawing rectangles, so
+	// sending it here just once is enough.
+	ptr    = allocateGP0Packet(chain, 1);
+	ptr[0] = gp0_setPage(font->page, false, false);
 
 	// Iterate over every character in the string.
 	for (; *str; str++) {
@@ -170,7 +169,7 @@ void printString(
 		// VRAM to those of the sprite itself within the sheet. Enable blending
 		// to make sure any semitransparent pixels in the font get rendered
 		// correctly.
-		ptr    = allocatePacket(chain, 4);
+		ptr    = allocateGP0Packet(chain, 4);
 		ptr[0] = gp0_rectangle(true, true, true);
 		ptr[1] = gp0_xy(currentX, currentY);
 		ptr[2] = gp0_uv(font->u + sprite->x, font->v + sprite->y, font->clut);

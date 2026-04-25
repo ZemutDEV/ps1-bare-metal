@@ -19,13 +19,12 @@
 #include <stdint.h>
 #include "ps1/gpucmd.h"
 
-#define DMA_MAX_CHUNK_SIZE   16
-#define CHAIN_BUFFER_SIZE  1024
+#define GPU_CHAIN_BUFFER_SIZE 1024
 
 typedef struct {
-	uint32_t data[CHAIN_BUFFER_SIZE];
+	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
 	uint32_t *nextPacket;
-} DMAChain;
+} GPUDMAChain;
 
 typedef struct {
 	uint8_t  u, v;
@@ -39,10 +38,10 @@ extern "C" {
 
 void setupGPU(GP1VideoMode mode, int width, int height);
 void waitForGP0Ready(void);
-void waitForDMADone(void);
+void waitForGPUDMADone(void);
 void waitForVSync(void);
 
-void sendLinkedList(const void *data);
+void sendGPULinkedList(const void *data);
 void sendVRAMData(
 	const void *data,
 	int        x,
@@ -50,7 +49,7 @@ void sendVRAMData(
 	int        width,
 	int        height
 );
-uint32_t *allocatePacket(DMAChain *chain, int numCommands);
+uint32_t *allocateGP0Packet(GPUDMAChain *chain, int numCommands);
 
 void uploadTexture(
 	TextureInfo *info,

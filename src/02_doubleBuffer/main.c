@@ -64,6 +64,7 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
 }
 
 static void waitForGP0Ready(void) {
@@ -97,9 +98,6 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	// Turn on the video output.
-	GPU_GP1 = gp1_dispBlank(false);
-
 	int x = 0, velocityX = 1;
 	int y = 0, velocityY = 1;
 
@@ -117,11 +115,11 @@ int main(int argc, const char **argv) {
 		// Tell the GPU which area of VRAM belongs to the frame we're going to
 		// use and enable dithering.
 		waitForGP0Ready();
-		GPU_GP0 = gp0_texpage(0, true, false);
+		GPU_GP0 = gp0_setPage(0, true, false);
 		GPU_GP0 = gp0_fbOffset1(frameX, frameY);
 		GPU_GP0 = gp0_fbOffset2(
 			frameX + SCREEN_WIDTH  - 1,
-			frameY + SCREEN_HEIGHT - 2
+			frameY + SCREEN_HEIGHT - 1
 		);
 		GPU_GP0 = gp0_fbOrigin(frameX, frameY);
 

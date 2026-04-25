@@ -22,15 +22,14 @@
 // We are going to store the ordering table for each frame as part of the DMA
 // chain structure. We'll have 32 different "buckets" and thus Z indices at our
 // disposal.
-#define DMA_MAX_CHUNK_SIZE    16
-#define CHAIN_BUFFER_SIZE   1024
-#define ORDERING_TABLE_SIZE   32
+#define GPU_CHAIN_BUFFER_SIZE   1024
+#define GPU_ORDERING_TABLE_SIZE   32
 
 typedef struct {
-	uint32_t data[CHAIN_BUFFER_SIZE];
-	uint32_t orderingTable[ORDERING_TABLE_SIZE];
+	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
+	uint32_t orderingTable[GPU_ORDERING_TABLE_SIZE];
 	uint32_t *nextPacket;
-} DMAChain;
+} GPUDMAChain;
 
 typedef struct {
 	uint8_t  u, v;
@@ -44,10 +43,10 @@ extern "C" {
 
 void setupGPU(GP1VideoMode mode, int width, int height);
 void waitForGP0Ready(void);
-void waitForDMADone(void);
+void waitForGPUDMADone(void);
 void waitForVSync(void);
 
-void sendLinkedList(const void *data);
+void sendGPULinkedList(const void *data);
 void sendVRAMData(
 	const void *data,
 	int        x,
@@ -56,7 +55,7 @@ void sendVRAMData(
 	int        height
 );
 void clearOrderingTable(uint32_t *table, int numEntries);
-uint32_t *allocatePacket(DMAChain *chain, int zIndex, int numCommands);
+uint32_t *allocateGP0Packet(GPUDMAChain *chain, int zIndex, int numCommands);
 
 void uploadTexture(
 	TextureInfo *info,

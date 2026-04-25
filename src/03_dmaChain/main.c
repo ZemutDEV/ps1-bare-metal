@@ -59,6 +59,14 @@ static void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
+
+	// Enable and reset the GPU's DMA channel, then tell the GPU to fetch GP0
+	// commands from DMA whenever available.
+	DMA_DPCR         |= DMA_DPCR_CH_ENABLE(DMA_GPU);
+	DMA_CHCR(DMA_GPU) = 0;
+
+	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
 }
 
 static void waitForGP0Ready(void) {
@@ -73,7 +81,7 @@ static void waitForVSync(void) {
 	IRQ_STAT = ~(1 << IRQ_VSYNC);
 }
 
-static void sendLinkedList(const void *data) {
+static void sendGPULinkedList(const void *data) {
 	// Wait until the GPU's DMA unit has finished sending data and is ready.
 	while (DMA_CHCR(DMA_GPU) & DMA_CHCR_ENABLE)
 		__asm__ volatile("");
@@ -96,15 +104,15 @@ static void sendLinkedList(const void *data) {
 // Define a structure we'll allocate our linked list packets into. We are going
 // to use a fixed-size buffer and keep a pointer to the beginning of its free
 // area, incrementing it whenever we allocate a new packet.
-#define DMA_MAX_CHUNK_SIZE   16
-#define CHAIN_BUFFER_SIZE  1024
+#define DMA_MAX_CHUNK_SIZE      16
+#define GPU_CHAIN_BUFFER_SIZE 1024
 
 typedef struct {
-	uint32_t data[CHAIN_BUFFER_SIZE];
+	uint32_t data[GPU_CHAIN_BUFFER_SIZE];
 	uint32_t *nextPacket;
-} DMAChain;
+} GPUDMAChain;
 
-static uint32_t *allocatePacket(DMAChain *chain, int numCommands) {
+static uint32_t *allocateGP0Packet(GPUDMAChain *chain, int numCommands) {
 	// Ensure no more than 16 command words are sent to the GPU at once, as
 	// sending larger packets may overrun the GP0 command FIFO and result in
 	// corrupted data.
@@ -124,7 +132,7 @@ static uint32_t *allocatePacket(DMAChain *chain, int numCommands) {
 
 	// Make sure we haven't yet run out of space for future packets or a linked
 	// list terminator, then return a pointer to the packet's first GP0 command.
-	assert(chain->nextPacket < &(chain->data)[CHAIN_BUFFER_SIZE]);
+	assert(chain->nextPacket < &(chain->data)[GPU_CHAIN_BUFFER_SIZE]);
 
 	return &ptr[1];
 }
@@ -143,28 +151,21 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	// Enable the GPU's DMA channel, tell the GPU to fetch GP0 commands from DMA
-	// whenever available and switch on the display output.
-	DMA_DPCR |= DMA_DPCR_CH_ENABLE(DMA_GPU);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
 	int x = 0, velocityX = 1;
 	int y = 0, velocityY = 1;
 
 	// Allocate a double command buffer in order to let the GPU keep fetching
 	// commands while the CPU is filling up the other buffer. See the previous
 	// example for more details on double buffering.
-	DMAChain dmaChains[2];
+	GPUDMAChain dmaChains[2];
 	bool     usingSecondFrame = false;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
@@ -180,21 +181,21 @@ int main(int argc, const char **argv) {
 		// up each command like this will make sure the DMA channel won't try to
 		// send them too quickly and end up overflowing the GPU's internal
 		// command processor.
-		ptr    = allocatePacket(chain, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH  - 1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(255, 255, 0) | gp0_rectangle(false, false, false);
 		ptr[1] = gp0_xy(x, y);
 		ptr[2] = gp0_xy(32, 32);
@@ -216,7 +217,7 @@ int main(int argc, const char **argv) {
 		// the main loop is going to run.
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(chain->data);
+		sendGPULinkedList(chain->data);
 	}
 
 	return 0;

@@ -54,30 +54,23 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	DMA_DPCR |= 0
-		| DMA_DPCR_CH_ENABLE(DMA_GPU)
-		| DMA_DPCR_CH_ENABLE(DMA_OTC);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
-	DMAChain dmaChains[2];
-	bool     usingSecondFrame = false;
-	int      frameCounter     = 0;
+	GPUDMAChain dmaChains[2];
+	bool        usingSecondFrame = false;
+	int         frameCounter     = 0;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
 		GPU_GP1 = gp1_fbOffset(bufferX, bufferY);
 
 		// Reset the ordering table to a blank state.
-		clearOrderingTable(chain->orderingTable, ORDERING_TABLE_SIZE);
+		clearOrderingTable(chain->orderingTable, GPU_ORDERING_TABLE_SIZE);
 		chain->nextPacket = chain->data;
 
 		// Draw 16 stacked squares, animating their Z indices. The packets are
@@ -96,7 +89,7 @@ int main(int argc, const char **argv) {
 			else
 				zIndex = i - frontSquareIndex;
 
-			ptr    = allocatePacket(chain, zIndex, 3);
+			ptr    = allocateGP0Packet(chain, zIndex, 3);
 			ptr[0] = color | gp0_rectangle(false, false, false);
 			ptr[1] = gp0_xy(x, y);
 			ptr[2] = gp0_xy(32, 32);
@@ -107,19 +100,19 @@ int main(int argc, const char **argv) {
 
 		// Place the framebuffer offset and screen clearing commands last, as
 		// the "furthest away" items in the table. Since the ordering table is
-		// reversed (see the allocatePacket() note), this ensures they'll be
+		// reversed (see the allocateGP0Packet() note), this ensures they'll be
 		// executed first.
-		ptr    = allocatePacket(chain, ORDERING_TABLE_SIZE - 1, 3);
+		ptr    = allocateGP0Packet(chain, GPU_ORDERING_TABLE_SIZE - 1, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
 
-		ptr    = allocatePacket(chain, ORDERING_TABLE_SIZE - 1, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, GPU_ORDERING_TABLE_SIZE - 1, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH  - 1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
@@ -128,7 +121,7 @@ int main(int argc, const char **argv) {
 		// already inserts a terminator packet.
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(&(chain->orderingTable)[ORDERING_TABLE_SIZE - 1]);
+		sendGPULinkedList(&(chain->orderingTable)[GPU_ORDERING_TABLE_SIZE - 1]);
 	}
 
 	return 0;

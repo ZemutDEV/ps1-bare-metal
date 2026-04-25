@@ -9,7 +9,7 @@ customizing the region string (used by some emulators to determine whether they
 should start in PAL or NTSC mode by default). Requires no external dependencies.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__  = "spicyjpeg"
 
 from argparse        import ArgumentParser, FileType, Namespace
@@ -132,24 +132,16 @@ class ELF:
 			fileOffset,
 			address,
 			_,
-			fileLength,
 			length,
+			_,
 			flags,
 			_
 		) in parseStructsFromFile(file, PROG_HEADER_STRUCT, progHeaderCount):
 			if headerType != ProgHeaderType.LOAD:
 				continue
 
-			# Retrieve the segment and trim or pad it if necessary.
 			file.seek(fileOffset)
-			data: bytes = file.read(fileLength)
-
-			if length > len(data):
-				data = data.ljust(length, b"\0")
-			else:
-				data = data[0:length]
-
-			self.segments.append(Segment(address, data, flags))
+			self.segments.append(Segment(address, file.read(length), flags))
 
 		#file.close()
 

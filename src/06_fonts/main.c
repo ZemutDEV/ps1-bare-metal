@@ -154,7 +154,7 @@ static const SpriteInfo fontSprites[] = {
 #define FONT_LINE_HEIGHT      10
 
 static void printString(
-	DMAChain          *chain,
+	GPUDMAChain       *chain,
 	const TextureInfo *font,
 	int               x,
 	int               y,
@@ -164,12 +164,11 @@ static void printString(
 
 	uint32_t *ptr;
 
-	// Start by sending a texpage command to tell the GPU to use the font's
-	// spritesheet. Note that the texpage command before a drawing command can
-	// be omitted when reusing the same texture, so sending it here just once is
-	// enough.
-	ptr    = allocatePacket(chain, 1);
-	ptr[0] = gp0_texpage(font->page, false, false);
+	// Start by sending a texture page command to tell the GPU to use the font's
+	// spritesheet. The page setting persists when drawing rectangles, so
+	// sending it here just once is enough.
+	ptr    = allocateGP0Packet(chain, 1);
+	ptr[0] = gp0_setPage(font->page, false, false);
 
 	// Iterate over every character in the string.
 	for (; *str; str++) {
@@ -206,7 +205,7 @@ static void printString(
 		// VRAM to those of the sprite itself within the sheet. Enable blending
 		// to make sure any semitransparent pixels in the font get rendered
 		// correctly.
-		ptr    = allocatePacket(chain, 4);
+		ptr    = allocateGP0Packet(chain, 4);
 		ptr[0] = gp0_rectangle(true, true, true);
 		ptr[1] = gp0_xy(currentX, currentY);
 		ptr[2] = gp0_uv(font->u + sprite->x, font->v + sprite->y, font->clut);
@@ -236,11 +235,6 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	DMA_DPCR |= DMA_DPCR_CH_ENABLE(DMA_GPU);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
 	TextureInfo font;
 
 	uploadIndexedTexture(
@@ -256,16 +250,16 @@ int main(int argc, const char **argv) {
 		FONT_COLOR_DEPTH
 	);
 
-	DMAChain dmaChains[2];
-	bool     usingSecondFrame = false;
-	int      frameCounter     = 0;
+	GPUDMAChain dmaChains[2];
+	bool        usingSecondFrame = false;
+	int         frameCounter     = 0;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
@@ -273,16 +267,16 @@ int main(int argc, const char **argv) {
 
 		chain->nextPacket = chain->data;
 
-		ptr    = allocatePacket(chain, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH  - 1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -307,7 +301,7 @@ int main(int argc, const char **argv) {
 
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(chain->data);
+		sendGPULinkedList(chain->data);
 	}
 
 	return 0;

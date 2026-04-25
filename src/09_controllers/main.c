@@ -36,6 +36,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include "font.h"
@@ -109,35 +110,40 @@ static bool waitForAcknowledge(int timeout) {
 // byte of each request packet is thus the "address" of the peripheral that
 // shall respond to it.
 typedef enum {
-	ADDR_CONTROLLER  = 0x01,
-	ADDR_MEMORY_CARD = 0x81
-} DeviceAddress;
+	SIO0_ADDR_CONTROLLER  = 0x01,
+	SIO0_ADDR_MEMORY_CARD = 0x81
+} SIO0DeviceAddress;
 
 // The address is followed by a command byte and any required parameters. The
 // only command used in this example (and supported by all controllers) is
-// CMD_POLL, however some controllers additionally support a "configuration
+// SIO0_PAD_POLL, however some controllers additionally support a "configuration
 // mode" which grants access to an extended command set.
 typedef enum {
-	CMD_INIT_PRESSURE   = '@', // Initialize DualShock pressure sensors (config)
-	CMD_POLL            = 'B', // Read controller state
-	CMD_CONFIG_MODE     = 'C', // Enter or exit configuration mode
-	CMD_SET_ANALOG      = 'D', // Set analog mode/LED state (config)
-	CMD_GET_ANALOG      = 'E', // Get analog mode/LED state (config)
-	CMD_GET_MOTOR_INFO  = 'F', // Get information about a motor (config)
-	CMD_GET_MOTOR_LIST  = 'G', // Get list of all motors (config)
-	CMD_GET_MOTOR_STATE = 'H', // Get current state of vibration motors (config)
-	CMD_GET_MODE        = 'L', // Get list of all supported modes (config)
-	CMD_REQUEST_CONFIG  = 'M', // Configure poll request format (config)
-	CMD_RESPONSE_CONFIG = 'O', // Configure poll response format (config)
-	CMD_CARD_READ       = 'R', // Read 128-byte memory card sector
-	CMD_CARD_GET_SIZE   = 'S', // Retrieve memory card size information
-	CMD_CARD_WRITE      = 'W'  // Write 128-byte memory card sector
-} DeviceCommand;
+	// Controller commands
+	SIO0_PAD_POLL        = 'B', // Read controller state
+	SIO0_PAD_CONFIG_MODE = 'C', // Enter or exit configuration mode
+
+	// Configuration mode commands
+	SIO0_CFG_INIT_PRESSURE  = '@', // Initialize DualShock 2 pressure sensors
+	SIO0_CFG_SET_ANALOG     = 'D', // Set analog mode/LED state
+	SIO0_CFG_GET_ANALOG     = 'E', // Get analog mode/LED state
+	SIO0_CFG_GET_ACT_INFO   = 'F', // Get information about a feedback actuator
+	SIO0_CFG_GET_ACT_LIST   = 'G', // Get list of all feedback actuators
+	SIO0_CFG_GET_ACT_STATE  = 'H', // Get current state of feedback actuators
+	SIO0_CFG_GET_MODE       = 'L', // Get list of all supported modes
+	SIO0_CFG_REQUEST_SETUP  = 'M', // Configure poll request format
+	SIO0_CFG_RESPONSE_SETUP = 'O', // Configure poll response format
+
+	// Memory card commands
+	SIO0_CARD_READ       = 'R', // Read 128-byte sector
+	SIO0_CARD_GET_SIZE   = 'S', // Retrieve size information
+	SIO0_CARD_WRITE      = 'W'  // Write 128-byte sector
+} SIO0_DeviceCommand;
 
 #define DTR_DELAY    60
 #define DSR_TIMEOUT 120
 
-static void selectPort(int port) {
+static void selectControllerPort(int port) {
 	// Set or clear the bit that controls which set of controller and memory
 	// card ports is going to have its DTR (port select) signal asserted. The
 	// actual serial bus is shared between all ports, however devices will not
@@ -162,12 +168,12 @@ static uint8_t exchangeByte(uint8_t value) {
 	return SIO_DATA(0);
 }
 
-static int exchangePacket(
-	DeviceAddress address,
-	const uint8_t *request,
-	uint8_t       *response,
-	int           reqLength,
-	int           maxRespLength
+static size_t exchangeSIO0Packet(
+	SIO0DeviceAddress address,
+	const uint8_t     *request,
+	uint8_t           *response,
+	size_t            reqLength,
+	size_t            maxRespLength
 ) {
 	// Reset the interrupt flag and assert the DTR signal to tell the controller
 	// or memory card that we're about to send a packet. Devices may take some
@@ -176,7 +182,7 @@ static int exchangePacket(
 	SIO_CTRL(0) |= SIO_CTRL_DTR | SIO_CTRL_ACKNOWLEDGE;
 	delayMicroseconds(DTR_DELAY);
 
-	int respLength = 0;
+	size_t respLength = 0;
 
 	// Send the address byte and wait for the device to respond with a pulse on
 	// the DSR line. If no response is received assume no device is connected,
@@ -262,17 +268,17 @@ static void printControllerInfo(int port, char *output) {
 	uint8_t request[4], response[8];
 	char    *ptr = output;
 
-	request[0] = CMD_POLL; // Command
-	request[1] = 0x00;     // Multitap address
-	request[2] = 0x00;     // Rumble motor control 1
-	request[3] = 0x00;     // Rumble motor control 2
+	request[0] = SIO0_PAD_POLL; // Command
+	request[1] = 0x00;          // Multitap address
+	request[2] = 0x00;          // Actuator control 1
+	request[3] = 0x00;          // Actuator control 2
 
 	// Send the request to the specified controller port and grab the response.
 	// Note that this is a relatively slow process and should be done only once
 	// per frame, unless higher polling rates are desired.
-	selectPort(port);
-	int respLength = exchangePacket(
-		ADDR_CONTROLLER,
+	selectControllerPort(port);
+	size_t respLength = exchangeSIO0Packet(
+		SIO0_ADDR_CONTROLLER,
 		request,
 		response,
 		sizeof(request),
@@ -309,7 +315,7 @@ static void printControllerInfo(int port, char *output) {
 
 	ptr += sprintf(ptr, "\n  Response data:\t");
 
-	for (int i = 0; i < respLength; i++)
+	for (size_t i = 0; i < respLength; i++)
 		ptr += sprintf(ptr, "%02X ", response[i]);
 }
 
@@ -333,11 +339,6 @@ int main(int argc, const char **argv) {
 		setupGPU(GP1_MODE_NTSC, SCREEN_WIDTH, SCREEN_HEIGHT);
 	}
 
-	DMA_DPCR |= DMA_DPCR_CH_ENABLE(DMA_GPU);
-
-	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
-	GPU_GP1 = gp1_dispBlank(false);
-
 	TextureInfo font;
 
 	uploadIndexedTexture(
@@ -353,15 +354,15 @@ int main(int argc, const char **argv) {
 		FONT_COLOR_DEPTH
 	);
 
-	DMAChain dmaChains[2];
-	bool     usingSecondFrame = false;
+	GPUDMAChain dmaChains[2];
+	bool        usingSecondFrame = false;
 
 	for (;;) {
 		int bufferX = usingSecondFrame ? SCREEN_WIDTH : 0;
 		int bufferY = 0;
 
-		DMAChain *chain  = &dmaChains[usingSecondFrame];
-		usingSecondFrame = !usingSecondFrame;
+		GPUDMAChain *chain = &dmaChains[usingSecondFrame];
+		usingSecondFrame   = !usingSecondFrame;
 
 		uint32_t *ptr;
 
@@ -369,16 +370,16 @@ int main(int argc, const char **argv) {
 
 		chain->nextPacket = chain->data;
 
-		ptr    = allocatePacket(chain, 4);
-		ptr[0] = gp0_texpage(0, true, false);
+		ptr    = allocateGP0Packet(chain, 4);
+		ptr[0] = gp0_setPage(0, true, false);
 		ptr[1] = gp0_fbOffset1(bufferX, bufferY);
 		ptr[2] = gp0_fbOffset2(
 			bufferX + SCREEN_WIDTH  - 1,
-			bufferY + SCREEN_HEIGHT - 2
+			bufferY + SCREEN_HEIGHT - 1
 		);
 		ptr[3] = gp0_fbOrigin(bufferX, bufferY);
 
-		ptr    = allocatePacket(chain, 3);
+		ptr    = allocateGP0Packet(chain, 3);
 		ptr[0] = gp0_rgb(64, 64, 64) | gp0_vramFill();
 		ptr[1] = gp0_xy(bufferX, bufferY);
 		ptr[2] = gp0_xy(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -397,7 +398,7 @@ int main(int argc, const char **argv) {
 
 		waitForGP0Ready();
 		waitForVSync();
-		sendLinkedList(chain->data);
+		sendGPULinkedList(chain->data);
 	}
 
 	return 0;

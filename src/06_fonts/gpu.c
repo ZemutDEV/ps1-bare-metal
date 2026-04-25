@@ -21,6 +21,8 @@
 #include "ps1/gpucmd.h"
 #include "ps1/registers.h"
 
+#define DMA_MAX_CHUNK_SIZE 16
+
 void setupGPU(GP1VideoMode mode, int width, int height) {
 	int x = 0x760;
 	int y = (mode == GP1_MODE_PAL) ? 0xa3 : 0x88;
@@ -41,6 +43,12 @@ void setupGPU(GP1VideoMode mode, int width, int height) {
 		false,
 		GP1_COLOR_16BPP
 	);
+	GPU_GP1 = gp1_dispBlank(false);
+
+	DMA_DPCR         |= DMA_DPCR_CH_ENABLE(DMA_GPU);
+	DMA_CHCR(DMA_GPU) = 0;
+
+	GPU_GP1 = gp1_dmaRequestMode(GP1_DREQ_GP0_WRITE);
 }
 
 void waitForGP0Ready(void) {
@@ -48,7 +56,7 @@ void waitForGP0Ready(void) {
 		__asm__ volatile("");
 }
 
-void waitForDMADone(void) {
+void waitForGPUDMADone(void) {
 	while (DMA_CHCR(DMA_GPU) & DMA_CHCR_ENABLE)
 		__asm__ volatile("");
 }
@@ -60,8 +68,8 @@ void waitForVSync(void) {
 	IRQ_STAT = ~(1 << IRQ_VSYNC);
 }
 
-void sendLinkedList(const void *data) {
-	waitForDMADone();
+void sendGPULinkedList(const void *data) {
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	DMA_MADR(DMA_GPU) = (uint32_t) data;
@@ -78,7 +86,7 @@ void sendVRAMData(
 	int        width,
 	int        height
 ) {
-	waitForDMADone();
+	waitForGPUDMADone();
 	assert(!((uint32_t) data % 4));
 
 	size_t length = (width * height + 1) / 2;
@@ -107,14 +115,14 @@ void sendVRAMData(
 		| DMA_CHCR_ENABLE;
 }
 
-uint32_t *allocatePacket(DMAChain *chain, int numCommands) {
+uint32_t *allocateGP0Packet(GPUDMAChain *chain, int numCommands) {
 	assert((numCommands >= 0) && (numCommands <= DMA_MAX_CHUNK_SIZE));
 
 	uint32_t *ptr      = chain->nextPacket;
 	chain->nextPacket += numCommands + 1;
 
 	*ptr = gp0_tag(numCommands, chain->nextPacket);
-	assert(chain->nextPacket < &(chain->data)[CHAIN_BUFFER_SIZE]);
+	assert(chain->nextPacket < &(chain->data)[GPU_CHAIN_BUFFER_SIZE]);
 
 	return &ptr[1];
 }
@@ -130,7 +138,7 @@ void uploadTexture(
 	assert((width <= 256) && (height <= 256));
 
 	sendVRAMData(data, x, y, width, height);
-	waitForDMADone();
+	waitForGPUDMADone();
 	GPU_GP0 = gp0_flushCache();
 
 	info->page   = gp0_page(
@@ -166,9 +174,9 @@ void uploadIndexedTexture(
 	assert(!(paletteX % 16) && ((paletteX + numColors) <= 1024));
 
 	sendVRAMData(image, imageX, imageY, width / widthDivider, height);
-	waitForDMADone();
+	waitForGPUDMADone();
 	sendVRAMData(palette, paletteX, paletteY, numColors, 1);
-	waitForDMADone();
+	waitForGPUDMADone();
 	GPU_GP0 = gp0_flushCache();
 
 	info->page   = gp0_page(
