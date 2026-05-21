@@ -3,7 +3,7 @@
 # copy of the toolchain that has not expired.
 
 name: Build examples
-on:   [ push, pull_request ]
+on:   [ push, workflow_dispatch ]
 
 jobs:
   build:
